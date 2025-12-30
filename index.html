@@ -87,6 +87,18 @@
             -webkit-appearance: none; 
             margin: 0; 
         }
+
+        /* Scrollbar for lists */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(0,0,0,0.1); 
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #D4AF37; 
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body class="bg-rich-900 text-gray-200 font-sans h-[100dvh] flex flex-col overflow-hidden relative">
@@ -133,9 +145,22 @@
         </div>
 
         <!-- LOBBY VIEW -->
-        <div id="lobby-view" class="relative z-10 w-full h-full flex flex-col p-6 transition-opacity duration-500">
+        <div id="lobby-view" class="relative z-10 w-full h-full flex flex-col p-6 transition-opacity duration-500 overflow-y-auto custom-scrollbar">
+            
+            <!-- Name Input Section -->
+            <div class="mb-4">
+                <label class="text-xs text-gray-500 ml-4 mb-1 block uppercase tracking-wider">Your Name</label>
+                <div class="flex gap-2">
+                    <input id="name-input" type="text" placeholder="Enter your name" 
+                        class="flex-grow bg-rich-800/80 border border-gray-700 text-gold-100 px-6 py-4 rounded-2xl focus:outline-none focus:border-gold-400/50 focus:ring-1 focus:ring-gold-400/50 transition-all placeholder-gray-700">
+                    <button id="save-name-btn" class="bg-gold-400/10 text-gold-400 border border-gold-400/30 px-6 rounded-2xl font-bold uppercase text-xs tracking-wider hover:bg-gold-400 hover:text-rich-900 transition-all">
+                        Save
+                    </button>
+                </div>
+            </div>
+
             <!-- My Number Card -->
-            <div class="mt-4 mb-8">
+            <div class="mb-8">
                 <p class="text-xs text-gold-300/60 uppercase tracking-widest mb-2 text-center">Your Secure ID</p>
                 <div class="glass-panel p-6 rounded-2xl border border-gold-400/30 text-center relative overflow-hidden group">
                     <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-gold-400 to-transparent opacity-50"></div>
@@ -147,7 +172,7 @@
             </div>
 
             <!-- Dial Pad Section -->
-            <div class="flex-grow flex flex-col justify-end pb-8 max-w-md mx-auto w-full">
+            <div class="pb-8 max-w-md mx-auto w-full">
                 <div class="space-y-6">
                     <div class="relative">
                         <label class="text-xs text-gray-500 ml-4 mb-1 block uppercase tracking-wider">Dial Number</label>
@@ -163,6 +188,14 @@
                     </button>
                     
                     <p id="status-msg" class="text-center text-xs text-gold-500/80 h-4 font-mono"></p>
+                </div>
+
+                <!-- Recent Connections -->
+                <div id="recent-calls-container" class="mt-8 hidden">
+                    <h3 class="text-xs text-gray-500 ml-4 mb-3 uppercase tracking-wider">Recent Connections</h3>
+                    <div id="recent-calls-list" class="space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-1">
+                        <!-- Javascript will inject items here -->
+                    </div>
                 </div>
             </div>
         </div>
@@ -230,6 +263,8 @@
 
         // --- STATE ---
         let myId = localStorage.getItem('lux_user_id');
+        let myName = localStorage.getItem('lux_user_name') || ""; // Load local name
+
         if (!myId || myId.length !== 10) {
             myId = Math.floor(1000000000 + Math.random() * 9000000000).toString();
             localStorage.setItem('lux_user_id', myId);
@@ -257,7 +292,7 @@
             status: getEl('status-msg'),
             localVideo: getEl('local-video'),
             remoteVideo: getEl('remote-video'),
-            localVideoContainer: getEl('local-video-container'), // Added Ref
+            localVideoContainer: getEl('local-video-container'), 
             waitingOverlay: getEl('waiting-overlay'),
             incomingModal: getEl('incoming-modal'),
             callerIdDisplay: getEl('caller-id-display'),
@@ -268,17 +303,97 @@
             muteBtn: getEl('mute-btn'),
             cameraBtn: getEl('camera-btn'),
             networkStatus: getEl('network-status'),
-            copyIdBtn: getEl('copy-id-btn')
+            copyIdBtn: getEl('copy-id-btn'),
+            nameInput: getEl('name-input'),
+            saveNameBtn: getEl('save-name-btn'),
+            recentCallsList: getEl('recent-calls-list'),
+            recentCallsContainer: getEl('recent-calls-container')
+        };
+
+        // --- RECENT CALLS MANAGER ---
+        function loadRecents() {
+            try {
+                return JSON.parse(localStorage.getItem('lux_recents') || '[]');
+            } catch { return []; }
+        }
+
+        function saveRecent(id, name, type) {
+            if(!id) return;
+            const recents = loadRecents();
+            // Remove existing entry for this ID to move it to top
+            const existingIndex = recents.findIndex(r => r.id === id);
+            
+            let displayName = name;
+            // If we have an existing name and the new one is "Unknown" or empty, keep the old one
+            if(existingIndex !== -1) {
+                if((!name || name === 'Unknown') && recents[existingIndex].name !== 'Unknown') {
+                    displayName = recents[existingIndex].name;
+                }
+                recents.splice(existingIndex, 1);
+            }
+
+            recents.unshift({
+                id: id,
+                name: displayName || "Unknown",
+                lastContact: Date.now(),
+                type: type // 'incoming' or 'outgoing'
+            });
+
+            // Keep only top 10
+            if(recents.length > 10) recents.pop();
+            
+            localStorage.setItem('lux_recents', JSON.stringify(recents));
+            renderRecents();
+        }
+
+        function renderRecents() {
+            const recents = loadRecents();
+            if(recents.length === 0) {
+                ui.recentCallsContainer.classList.add('hidden');
+                return;
+            }
+            
+            ui.recentCallsContainer.classList.remove('hidden');
+            ui.recentCallsList.innerHTML = '';
+            
+            recents.forEach(contact => {
+                const item = document.createElement('div');
+                item.className = "glass-panel p-3 rounded-xl flex justify-between items-center group active:bg-white/10 transition-all";
+                
+                const formattedId = contact.id.replace(/(\d{3})(\d{3})(\d{4})/, '$1 $2 $3');
+                const isUnknown = contact.name === 'Unknown';
+                
+                item.innerHTML = `
+                    <div class="cursor-pointer flex-grow" onclick="window.populateAndCall('${contact.id}')">
+                        <p class="text-gold-100 font-serif font-bold ${isUnknown ? 'italic text-gray-400' : ''}">${contact.name}</p>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs ${contact.type === 'incoming' ? 'text-blue-400' : 'text-green-400'}">
+                                ${contact.type === 'incoming' ? '↙' : '↗'}
+                            </span>
+                            <p class="text-xs text-gray-500 font-mono tracking-widest">${formattedId}</p>
+                        </div>
+                    </div>
+                    <button onclick="window.populateAndCall('${contact.id}')" class="text-gold-400 p-2 rounded-full border border-gold-400/20 hover:bg-gold-400 hover:text-rich-900 transition-colors">
+                        <i data-lucide="phone" class="w-4 h-4"></i>
+                    </button>
+                `;
+                ui.recentCallsList.appendChild(item);
+            });
+            lucide.createIcons();
+        }
+        
+        // Expose global function for click handlers
+        window.populateAndCall = (id) => {
+            if(ui.targetInput) {
+                ui.targetInput.value = id;
+                ui.callBtn.click();
+            }
         };
 
         // --- DRAG FUNCTIONALITY ---
         function makeDraggable(element) {
             let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-            
-            // Mouse events
             element.onmousedown = dragMouseDown;
-            
-            // Touch events
             element.ontouchstart = dragTouchStart;
 
             function dragMouseDown(e) {
@@ -318,21 +433,16 @@
             }
 
             function setElementPos() {
-                // Bounds check
                 let newTop = element.offsetTop - pos2;
                 let newLeft = element.offsetLeft - pos1;
-                
                 const maxX = window.innerWidth - element.offsetWidth;
                 const maxY = window.innerHeight - element.offsetHeight;
-
                 if(newTop < 0) newTop = 0;
                 if(newLeft < 0) newLeft = 0;
                 if(newTop > maxY) newTop = maxY;
                 if(newLeft > maxX) newLeft = maxX;
-
                 element.style.top = newTop + "px";
                 element.style.left = newLeft + "px";
-                // Reset right/bottom so left/top take precedence
                 element.style.right = 'auto';
                 element.style.bottom = 'auto';
             }
@@ -345,11 +455,12 @@
             }
         }
         
-        // Init Draggable
         if(ui.localVideoContainer) makeDraggable(ui.localVideoContainer);
 
         // --- INITIALIZATION ---
         if (ui.myIdDisplay) ui.myIdDisplay.textContent = myId.replace(/(\d{3})(\d{3})(\d{4})/, '$1 $2 $3');
+        if (ui.nameInput && myName) ui.nameInput.value = myName;
+        renderRecents(); // Initial Render
         lucide.createIcons();
 
         // --- AUTH ---
@@ -373,11 +484,58 @@
                     ui.networkStatus.classList.add('bg-green-500', 'shadow-[0_0_8px_rgba(34,197,94,0.5)]');
                 }
                 if(ui.callBtn) ui.callBtn.disabled = false;
+                
+                // Fetch saved name from DB on load (Source of Truth)
+                const userDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', myId);
+                getDoc(userDocRef).then(snap => {
+                    if(snap.exists()) {
+                        const data = snap.data();
+                        if(data.name) {
+                            myName = data.name;
+                            if(ui.nameInput) ui.nameInput.value = myName;
+                            localStorage.setItem('lux_user_name', myName);
+                        }
+                    }
+                });
+
                 listenForIncomingCalls(); 
             }
         });
 
         initAuth();
+
+        // --- SAVE NAME ---
+        if(ui.saveNameBtn) {
+            ui.saveNameBtn.onclick = async () => {
+                const name = ui.nameInput.value.trim();
+                if(!name) {
+                    ui.status.textContent = "Please enter a name";
+                    return;
+                }
+                
+                ui.saveNameBtn.disabled = true;
+                ui.saveNameBtn.textContent = "...";
+                
+                try {
+                    const userDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', myId);
+                    await setDoc(userDocRef, { name: name }, { merge: true });
+                    
+                    myName = name;
+                    localStorage.setItem('lux_user_name', name);
+                    
+                    ui.saveNameBtn.textContent = "Saved";
+                    setTimeout(() => {
+                        ui.saveNameBtn.disabled = false;
+                        ui.saveNameBtn.textContent = "Save";
+                    }, 2000);
+                } catch(e) {
+                    console.error("Error saving name", e);
+                    ui.status.textContent = "Error saving name";
+                    ui.saveNameBtn.disabled = false;
+                    ui.saveNameBtn.textContent = "Save";
+                }
+            };
+        }
 
         // --- WEBRTC ---
         const servers = {
@@ -405,19 +563,15 @@
         function createPeerConnection(isInitiator, callDocRef) {
             pc = new RTCPeerConnection(servers);
             
-            // Add local tracks
             localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
             
-            // Handle remote tracks
             pc.ontrack = event => {
                 event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
             };
 
-            // Handle Ice Candidates (Send to Firestore)
             pc.onicecandidate = event => {
                 if (event.candidate) {
                     const fieldName = isInitiator ? 'offerCandidates' : 'answerCandidates';
-                    // We use arrayUnion to safely append to the array in the doc
                     updateDoc(callDocRef, {
                         [fieldName]: arrayUnion(event.candidate.toJSON())
                     }).catch(e => console.log("Error sending candidate (safely ignored if doc closed)", e));
@@ -429,7 +583,6 @@
 
         // --- LOGIC: LISTEN FOR CALLS ---
         function listenForIncomingCalls() {
-            // Path Rule Compliant: /artifacts/{appId}/public/data/calls/{myId}
             const myCallDoc = doc(db, 'artifacts', appId, 'public', 'data', 'calls', myId);
 
             unsubscribeIncoming = onSnapshot(myCallDoc, (snapshot) => {
@@ -437,20 +590,25 @@
                 
                 // 1. Incoming Call
                 if (data && data.status === 'calling' && !currentCallId) {
-                    if(ui.callerIdDisplay) ui.callerIdDisplay.textContent = data.callerId || "Unknown";
+                    // Show Name if available, else ID
+                    const callerName = data.callerName || data.callerId || "Unknown";
+                    if(ui.callerIdDisplay) {
+                        ui.callerIdDisplay.textContent = callerName;
+                    }
                     if(ui.incomingModal) {
                         ui.incomingModal.classList.remove('hidden');
                         ui.incomingModal.classList.add('flex');
                     }
+                    // Save to recents immediately on ring
+                    saveRecent(data.callerId, data.callerName || "Unknown", 'incoming');
                 }
                 
-                // 2. Call Ended remotely (while we are listening)
+                // 2. Call Ended remotely
                 if ((!data || data.status === 'ended') && currentCallId && !isCaller) {
                    resetCall();
                 }
             }, (error) => {
-                // IMPORTANT: Error catcher prevents "Uncaught Error" crashing the app
-                console.warn("Incoming listener warning (usually permissions or init):", error);
+                console.warn("Incoming listener warning:", error);
             });
         }
 
@@ -464,10 +622,22 @@
                 ui.callBtn.disabled = true;
                 ui.status.textContent = "Dialing...";
 
+                // Try to fetch target name for history
+                let targetName = "Unknown";
+                try {
+                     const targetUserDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', targetId));
+                     if(targetUserDoc.exists() && targetUserDoc.data().name) {
+                         targetName = targetUserDoc.data().name;
+                     }
+                } catch(e) {}
+                
+                // Save to history
+                saveRecent(targetId, targetName, 'outgoing');
+
                 if (await startLocalStream()) {
                     isCaller = true;
                     currentCallId = targetId; 
-                    processedCandidates.clear(); // Reset candidate tracker
+                    processedCandidates.clear(); 
                     
                     ui.lobby.classList.add('hidden');
                     ui.call.classList.remove('hidden');
@@ -475,20 +645,17 @@
 
                     const callDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'calls', targetId);
                     
-                    // 1. Create PC
                     pc = createPeerConnection(true, callDocRef);
 
-                    // 2. Create Offer
                     const offerDescription = await pc.createOffer();
                     await pc.setLocalDescription(offerDescription);
 
                     const offer = { sdp: offerDescription.sdp, type: offerDescription.type };
 
-                    // 3. Write Initial Doc (Overwrite if exists)
-                    // We initialize the arrays here
                     try {
                         await setDoc(callDocRef, {
                             callerId: myId,
+                            callerName: myName || "Unknown", // Send Name
                             offer: offer,
                             status: 'calling',
                             timestamp: Date.now(),
@@ -502,14 +669,10 @@
                         return;
                     }
 
-                    // 4. Listen for Answer and Remote Candidates (Single Listener)
                     unsubscribeActiveCall = onSnapshot(callDocRef, (snapshot) => {
                         const data = snapshot.data();
                         if (!data) { resetCall(); return; }
 
-                        // Check for Answer
-                        // FIX: Ensure we only set remote description if we are in 'have-local-offer' state
-                        // This prevents "Called in wrong state: stable" error if snapshot fires multiple times
                         if (pc && pc.signalingState === 'have-local-offer' && data.answer && data.status === 'connected') {
                             const answerDescription = new RTCSessionDescription(data.answer);
                             pc.setRemoteDescription(answerDescription)
@@ -519,14 +682,11 @@
                                 .catch(e => console.error("Error setting remote answer:", e));
                         }
 
-                        // Check for Remote Candidates (Answer Candidates)
                         if (data.answerCandidates && Array.isArray(data.answerCandidates)) {
                             data.answerCandidates.forEach(candidate => {
-                                // Simple dedup based on candidate string representation
                                 const candStr = JSON.stringify(candidate);
                                 if (!processedCandidates.has(candStr)) {
                                     processedCandidates.add(candStr);
-                                    // Guard against adding candidates before remote description is set or if closed
                                     if(pc && pc.remoteDescription) {
                                         pc.addIceCandidate(new RTCIceCandidate(candidate))
                                             .catch(e => console.log("Candidate error (ignored):", e));
@@ -558,29 +718,24 @@
 
                     const callDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'calls', myId);
                     
-                    // 1. Create PC
                     pc = createPeerConnection(false, callDocRef);
 
-                    // 2. Get Offer
                     const snapshot = await getDoc(callDocRef);
                     const data = snapshot.data();
                     if(!data) { resetCall(); return; }
                     
                     await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
 
-                    // 3. Create Answer
                     const answerDescription = await pc.createAnswer();
                     await pc.setLocalDescription(answerDescription);
                     
                     const answer = { type: answerDescription.type, sdp: answerDescription.sdp };
 
-                    // 4. Update Doc
                     await updateDoc(callDocRef, {
                         answer: answer,
                         status: 'connected'
                     });
 
-                    // 5. Process any existing candidates from caller immediately
                     if(data.offerCandidates) {
                         data.offerCandidates.forEach(c => {
                             const str = JSON.stringify(c);
@@ -591,7 +746,6 @@
                         });
                     }
 
-                    // 6. Listen for future candidates
                     unsubscribeActiveCall = onSnapshot(callDocRef, (snapshot) => {
                         const data = snapshot.data();
                         if (!data) return;
@@ -615,7 +769,6 @@
         // --- UTILS ---
         async function endCall() {
             if (currentCallId) {
-                // Delete the doc to signal end
                 const docId = isCaller ? currentCallId : myId;
                 const callDoc = doc(db, 'artifacts', appId, 'public', 'data', 'calls', docId);
                 try { await deleteDoc(callDoc); } catch(e) {}
