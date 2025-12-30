@@ -392,8 +392,8 @@
                         event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
                     };
 
-                    // Corrected Path: subcollections passed as explicit arguments
-                    const candidatesCol = collection(db, 'artifacts', appId, 'public', 'data', 'calls', targetId, 'candidates');
+                    // Corrected Path: Flattened collection to avoid permission issues with subcollections
+                    const candidatesCol = collection(db, 'artifacts', appId, 'public', 'data', `candidates_${targetId}`);
                     
                     pc.onicecandidate = event => {
                         if (event.candidate) {
@@ -472,8 +472,8 @@
                         event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
                     };
 
-                    // Corrected Path
-                    const candidatesCol = collection(db, 'artifacts', appId, 'public', 'data', 'calls', myId, 'candidates');
+                    // Corrected Path: Flattened collection to avoid permission issues with subcollections
+                    const candidatesCol = collection(db, 'artifacts', appId, 'public', 'data', `candidates_${myId}`);
                     
                     pc.onicecandidate = event => {
                         if (event.candidate) {
