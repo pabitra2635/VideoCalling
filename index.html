@@ -218,7 +218,7 @@
                     </div>
                 </div>
                 <h3 class="text-xl font-bold text-white mb-2">Establishing Connection</h3>
-                <p class="text-slate-400 text-sm font-mono mb-8">Handshake in progress...</p>
+                <p id="connection-status-text" class="text-slate-400 text-sm font-mono mb-8">Calling...</p>
                 <button id="cancel-call-btn" class="px-8 py-2.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/50 transition-all text-xs font-bold uppercase tracking-widest">
                     Cancel Request
                 </button>
@@ -414,7 +414,8 @@
             nameInput: getEl('name-input'),
             saveNameBtn: getEl('save-name-btn'),
             recentCallsList: getEl('recent-calls-list'),
-            recentCallsContainer: getEl('recent-calls-container')
+            recentCallsContainer: getEl('recent-calls-container'),
+            connectionStatus: getEl('connection-status-text') // New ref
         };
 
         // --- RECENTS ---
@@ -625,7 +626,6 @@
                 const data = snapshot.data();
                 if(!data) return;
 
-                // 1. Check for Missed Calls (from DB)
                 if (data.missed && Array.isArray(data.missed) && data.missed.length > 0) {
                     data.missed.forEach(call => {
                         saveRecent(call.callerId, call.callerName || "Unknown", 'missed');
@@ -633,19 +633,20 @@
                     updateDoc(myCallDoc, { missed: [] });
                 }
 
-                // 2. Incoming Call
                 if (data.status === 'calling' && !currentCallId) {
                     const callerName = data.callerName || data.callerId || "Unknown";
                     if(ui.callerIdDisplay) ui.callerIdDisplay.textContent = callerName;
                     if(ui.incomingModal) {
                         ui.incomingModal.classList.remove('hidden');
                         ui.incomingModal.classList.add('flex');
-                        sm.playRingtone(); // PLAY RINGTONE
+                        sm.playRingtone(); 
+                        
+                        // NOTIFY CALLER WE ARE RINGING (ACKNOWLEDGEMENT)
+                        updateDoc(myCallDoc, { status: 'ringing' }).catch(e=>{});
                     }
                     saveRecent(data.callerId, data.callerName || "Unknown", 'incoming');
                 }
                 
-                // 3. Call Ended Remotely
                 if (data.status === 'ended' && currentCallId && !isCaller) {
                    resetCall();
                 }
@@ -669,9 +670,14 @@
 
                 if (await startLocalStream()) {
                     isCaller = true; currentCallId = targetId; processedCandidates.clear();
-                    ui.lobby.classList.add('hidden'); ui.call.classList.remove('hidden'); ui.waitingOverlay.classList.remove('hidden');
                     
-                    sm.playRingback(); // PLAY RINGBACK
+                    // INITIAL UI STATE
+                    ui.lobby.classList.add('hidden'); 
+                    ui.call.classList.remove('hidden'); 
+                    ui.waitingOverlay.classList.remove('hidden');
+                    if(ui.connectionStatus) ui.connectionStatus.textContent = "Calling...";
+                    
+                    sm.playRingback(); 
 
                     const callDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'calls', targetId);
                     pc = createPeerConnection(true, callDocRef);
@@ -697,12 +703,17 @@
                         const data = snapshot.data();
                         if (!data) { resetCall(); return; }
                         
+                        // UPDATE UI IF RECEIVER ACKNOWLEDGES
+                        if (data.status === 'ringing') {
+                            if(ui.connectionStatus) ui.connectionStatus.textContent = "Ringing...";
+                        }
+                        
                         if (pc && pc.signalingState === 'have-local-offer' && data.answer && data.status === 'connected') {
                             const answerDescription = new RTCSessionDescription(data.answer);
                             pc.setRemoteDescription(answerDescription)
                                 .then(() => {
                                     ui.waitingOverlay.classList.add('hidden');
-                                    sm.playConnect(); // PLAY CONNECT SOUND
+                                    sm.playConnect(); 
                                 })
                                 .catch(e => console.error("Error answer:", e));
                         }
@@ -728,7 +739,7 @@
             ui.acceptBtn.onclick = async () => {
                 ui.incomingModal.classList.add('hidden'); ui.incomingModal.classList.remove('flex');
                 
-                sm.playConnect(); // PLAY CONNECT SOUND
+                sm.playConnect(); 
 
                 if (await startLocalStream()) {
                     isCaller = false; currentCallId = myId; processedCandidates.clear();
