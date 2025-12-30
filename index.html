@@ -77,8 +77,9 @@
 
         /* Floating Video */
         #local-video-container {
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            /* Removed transition for smooth dragging */
             box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            touch-action: none; /* Crucial for dragging on mobile */
         }
         
         input[type=number]::-webkit-inner-spin-button, 
@@ -179,6 +180,7 @@
                 </button>
             </div>
 
+            <!-- Added id for container and changed positioning to inline style in JS, but keeping defaults here -->
             <div id="local-video-container" class="absolute top-6 right-6 w-32 h-48 md:w-48 md:h-72 bg-rich-800 rounded-xl overflow-hidden border-2 border-gold-400/50 shadow-2xl z-40 cursor-move">
                 <video id="local-video" autoplay playsinline muted class="w-full h-full object-cover transform scale-x-[-1]"></video>
             </div>
@@ -255,6 +257,7 @@
             status: getEl('status-msg'),
             localVideo: getEl('local-video'),
             remoteVideo: getEl('remote-video'),
+            localVideoContainer: getEl('local-video-container'), // Added Ref
             waitingOverlay: getEl('waiting-overlay'),
             incomingModal: getEl('incoming-modal'),
             callerIdDisplay: getEl('caller-id-display'),
@@ -267,6 +270,83 @@
             networkStatus: getEl('network-status'),
             copyIdBtn: getEl('copy-id-btn')
         };
+
+        // --- DRAG FUNCTIONALITY ---
+        function makeDraggable(element) {
+            let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+            
+            // Mouse events
+            element.onmousedown = dragMouseDown;
+            
+            // Touch events
+            element.ontouchstart = dragTouchStart;
+
+            function dragMouseDown(e) {
+                e = e || window.event;
+                e.preventDefault();
+                pos3 = e.clientX;
+                pos4 = e.clientY;
+                document.onmouseup = closeDragElement;
+                document.onmousemove = elementDrag;
+            }
+
+            function dragTouchStart(e) {
+                const touch = e.touches[0];
+                pos3 = touch.clientX;
+                pos4 = touch.clientY;
+                document.ontouchend = closeDragElement;
+                document.ontouchmove = elementDragTouch;
+            }
+
+            function elementDrag(e) {
+                e = e || window.event;
+                e.preventDefault();
+                pos1 = pos3 - e.clientX;
+                pos2 = pos4 - e.clientY;
+                pos3 = e.clientX;
+                pos4 = e.clientY;
+                setElementPos();
+            }
+
+            function elementDragTouch(e) {
+                const touch = e.touches[0];
+                pos1 = pos3 - touch.clientX;
+                pos2 = pos4 - touch.clientY;
+                pos3 = touch.clientX;
+                pos4 = touch.clientY;
+                setElementPos();
+            }
+
+            function setElementPos() {
+                // Bounds check
+                let newTop = element.offsetTop - pos2;
+                let newLeft = element.offsetLeft - pos1;
+                
+                const maxX = window.innerWidth - element.offsetWidth;
+                const maxY = window.innerHeight - element.offsetHeight;
+
+                if(newTop < 0) newTop = 0;
+                if(newLeft < 0) newLeft = 0;
+                if(newTop > maxY) newTop = maxY;
+                if(newLeft > maxX) newLeft = maxX;
+
+                element.style.top = newTop + "px";
+                element.style.left = newLeft + "px";
+                // Reset right/bottom so left/top take precedence
+                element.style.right = 'auto';
+                element.style.bottom = 'auto';
+            }
+
+            function closeDragElement() {
+                document.onmouseup = null;
+                document.onmousemove = null;
+                document.ontouchend = null;
+                document.ontouchmove = null;
+            }
+        }
+        
+        // Init Draggable
+        if(ui.localVideoContainer) makeDraggable(ui.localVideoContainer);
 
         // --- INITIALIZATION ---
         if (ui.myIdDisplay) ui.myIdDisplay.textContent = myId.replace(/(\d{3})(\d{3})(\d{4})/, '$1 $2 $3');
