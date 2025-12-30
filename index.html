@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>LuxCall | Premium Mobile</title>
+    <!-- Favicon fix -->
+    <link rel="icon" href="data:,">
     
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -85,19 +87,6 @@
             box-shadow: 0 10px 30px rgba(0,0,0,0.5);
         }
         
-        .gold-gradient-text {
-            background: linear-gradient(to right, #F9F1D8, #D4AF37, #F9F1D8);
-            -webkit-background-clip: text;
-            background-clip: text;
-            color: transparent;
-            background-size: 200% auto;
-            animation: shine 5s linear infinite;
-        }
-
-        @keyframes shine {
-            to { background-position: 200% center; }
-        }
-
         input[type=number]::-webkit-inner-spin-button, 
         input[type=number]::-webkit-outer-spin-button { 
             -webkit-appearance: none; 
@@ -107,7 +96,7 @@
 </head>
 <body class="bg-rich-900 text-gray-200 font-sans h-[100dvh] flex flex-col overflow-hidden relative">
 
-    <!-- Incoming Call Modal (Hidden by default) -->
+    <!-- Incoming Call Modal -->
     <div id="incoming-modal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm p-4">
         <div class="w-full max-w-sm glass-panel rounded-2xl p-6 flex flex-col items-center gap-6 animate-slide-up border-t-2 border-gold-400 shadow-2xl shadow-gold-900/20">
             <div class="w-20 h-20 rounded-full bg-rich-800 border-2 border-gold-400 flex items-center justify-center animate-ring">
@@ -246,7 +235,7 @@
                   measurementId: "G-3CZ0BG0K47"
                 };
             }
-        } catch (e) { console.error(e); }
+        } catch (e) { console.error("Config Error:", e); }
 
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
@@ -255,7 +244,6 @@
         // --- STATE & UTILS ---
         let myId = localStorage.getItem('lux_user_id');
         if (!myId || myId.length !== 10) {
-            // Generate robust 10 digit ID (avoiding starting with 0)
             myId = Math.floor(1000000000 + Math.random() * 9000000000).toString();
             localStorage.setItem('lux_user_id', myId);
         }
@@ -263,35 +251,40 @@
         let pc = null;
         let localStream = null;
         let remoteStream = null;
-        let currentCallId = null; // The ID of the person being called (or my ID if receiving)
+        let currentCallId = null; 
         let isCaller = false;
-        let unsubscribeCall = null;
+        
+        // Listeners - Separated to avoid overwriting
+        let unsubscribeIncoming = null; 
+        let unsubscribeActiveCall = null;
         let unsubscribeCandidates = null;
 
-        // --- UI REFS ---
+        // --- UI REFS (Defensive Selection) ---
+        const getEl = (id) => document.getElementById(id);
         const ui = {
-            lobby: document.getElementById('lobby-view'),
-            call: document.getElementById('call-view'),
-            myIdDisplay: document.getElementById('my-id-display'),
-            targetInput: document.getElementById('target-id-input'),
-            callBtn: document.getElementById('call-btn'),
-            status: document.getElementById('status-msg'),
-            localVideo: document.getElementById('local-video'),
-            remoteVideo: document.getElementById('remote-video'),
-            waitingOverlay: document.getElementById('waiting-overlay'),
-            incomingModal: document.getElementById('incoming-modal'),
-            callerIdDisplay: document.getElementById('caller-id-display'),
-            acceptBtn: document.getElementById('accept-btn'),
-            declineBtn: document.getElementById('decline-btn'),
-            cancelBtn: document.getElementById('cancel-call-btn'),
-            hangupBtn: document.getElementById('hangup-btn'),
-            muteBtn: document.getElementById('mute-btn'),
-            cameraBtn: document.getElementById('camera-btn'),
-            networkStatus: document.getElementById('network-status')
+            lobby: getEl('lobby-view'),
+            call: getEl('call-view'),
+            myIdDisplay: getEl('my-id-display'),
+            targetInput: getEl('target-id-input'),
+            callBtn: getEl('call-btn'),
+            status: getEl('status-msg'),
+            localVideo: getEl('local-video'),
+            remoteVideo: getEl('remote-video'),
+            waitingOverlay: getEl('waiting-overlay'),
+            incomingModal: getEl('incoming-modal'),
+            callerIdDisplay: getEl('caller-id-display'),
+            acceptBtn: getEl('accept-btn'),
+            declineBtn: getEl('decline-btn'),
+            cancelBtn: getEl('cancel-call-btn'),
+            hangupBtn: getEl('hangup-btn'),
+            muteBtn: getEl('mute-btn'),
+            cameraBtn: getEl('camera-btn'),
+            networkStatus: getEl('network-status'),
+            copyIdBtn: getEl('copy-id-btn')
         };
 
         // --- INIT ---
-        ui.myIdDisplay.textContent = myId.replace(/(\d{3})(\d{3})(\d{4})/, '$1 $2 $3'); // Format as phone number
+        if (ui.myIdDisplay) ui.myIdDisplay.textContent = myId.replace(/(\d{3})(\d{3})(\d{4})/, '$1 $2 $3');
         lucide.createIcons();
 
         // --- AUTH ---
@@ -304,16 +297,17 @@
                 }
             } catch (error) {
                 console.error("Auth error", error);
+                if(ui.status) ui.status.textContent = "Auth Error. Refresh.";
             }
         }
 
         onAuthStateChanged(auth, (user) => {
             if (user) {
-                ui.networkStatus.classList.remove('bg-red-500', 'shadow-[0_0_8px_rgba(239,68,68,0.5)]');
-                ui.networkStatus.classList.add('bg-green-500', 'shadow-[0_0_8px_rgba(34,197,94,0.5)]');
-                ui.callBtn.disabled = false;
-                
-                // Start listening for incoming calls on my ID
+                if(ui.networkStatus) {
+                    ui.networkStatus.classList.remove('bg-red-500', 'shadow-[0_0_8px_rgba(239,68,68,0.5)]');
+                    ui.networkStatus.classList.add('bg-green-500', 'shadow-[0_0_8px_rgba(34,197,94,0.5)]');
+                }
+                if(ui.callBtn) ui.callBtn.disabled = false;
                 listenForIncomingCalls(); 
             }
         });
@@ -333,205 +327,201 @@
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
                 localStream = stream;
-                ui.localVideo.srcObject = stream;
+                if(ui.localVideo) ui.localVideo.srcObject = stream;
                 remoteStream = new MediaStream();
-                ui.remoteVideo.srcObject = remoteStream;
+                if(ui.remoteVideo) ui.remoteVideo.srcObject = remoteStream;
                 return true;
             } catch (err) {
                 console.error(err);
-                ui.status.textContent = "Error: Camera/Mic required";
+                if(ui.status) ui.status.textContent = "Error: Camera/Mic required";
                 return false;
             }
         }
 
         // --- INCOMING CALL LOGIC ---
         function listenForIncomingCalls() {
-            // My ID acts as the "Room" for incoming calls
             // Path: /artifacts/{appId}/public/data/calls/{myId}
             const myCallDoc = doc(db, 'artifacts', appId, 'public', 'data', 'calls', myId);
 
-            unsubscribeCall = onSnapshot(myCallDoc, (snapshot) => {
+            unsubscribeIncoming = onSnapshot(myCallDoc, (snapshot) => {
                 const data = snapshot.data();
                 
-                // Case 1: Incoming Call Request (Status: calling)
+                // Case 1: Incoming Call Request
                 if (data && data.status === 'calling' && !currentCallId) {
-                    // Show Modal
-                    ui.callerIdDisplay.textContent = data.callerId || "Unknown";
-                    ui.incomingModal.classList.remove('hidden');
-                    ui.incomingModal.classList.add('flex');
+                    if(ui.callerIdDisplay) ui.callerIdDisplay.textContent = data.callerId || "Unknown";
+                    if(ui.incomingModal) {
+                        ui.incomingModal.classList.remove('hidden');
+                        ui.incomingModal.classList.add('flex');
+                    }
                 }
                 
                 // Case 2: Call Ended remotely
-                if ((!data || data.status === 'ended') && currentCallId) {
+                if ((!data || data.status === 'ended') && currentCallId && !isCaller) {
                    resetCall();
                 }
             });
         }
 
         // --- OUTGOING CALL LOGIC ---
-        ui.callBtn.onclick = async () => {
-            const targetId = ui.targetInput.value.replace(/\s/g, '');
-            if (targetId.length !== 10) {
-                ui.status.textContent = "Enter valid 10-digit ID";
-                return;
-            }
-            if (targetId === myId) {
-                ui.status.textContent = "Cannot call yourself";
-                return;
-            }
+        if(ui.callBtn) {
+            ui.callBtn.onclick = async () => {
+                const targetId = ui.targetInput.value.replace(/\s/g, '');
+                if (targetId.length !== 10) {
+                    ui.status.textContent = "Enter valid 10-digit ID";
+                    return;
+                }
+                if (targetId === myId) {
+                    ui.status.textContent = "Cannot call yourself";
+                    return;
+                }
 
-            ui.callBtn.disabled = true;
-            ui.status.textContent = "Dialing...";
+                ui.callBtn.disabled = true;
+                ui.status.textContent = "Dialing...";
 
-            if (await startLocalStream()) {
-                isCaller = true;
-                currentCallId = targetId; // We are calling targetId
-                
-                // Switch View
-                ui.lobby.classList.add('hidden');
-                ui.call.classList.remove('hidden');
-                ui.waitingOverlay.classList.remove('hidden');
+                if (await startLocalStream()) {
+                    isCaller = true;
+                    currentCallId = targetId; 
+                    
+                    ui.lobby.classList.add('hidden');
+                    ui.call.classList.remove('hidden');
+                    ui.waitingOverlay.classList.remove('hidden');
 
-                // 1. Create Peer Connection
-                pc = new RTCPeerConnection(servers);
-                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-                pc.ontrack = event => {
-                    event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
-                };
+                    pc = new RTCPeerConnection(servers);
+                    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+                    pc.ontrack = event => {
+                        event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
+                    };
 
-                // 2. Collect Candidates -> send to target's collection
-                const candidatesCol = collection(db, 'artifacts', appId, 'public', 'data', `calls/${targetId}/candidates`);
-                pc.onicecandidate = event => {
-                    if (event.candidate) {
-                        addDoc(candidatesCol, { candidate: event.candidate.toJSON(), type: 'offer' });
+                    // Corrected Path: subcollections passed as explicit arguments
+                    const candidatesCol = collection(db, 'artifacts', appId, 'public', 'data', 'calls', targetId, 'candidates');
+                    
+                    pc.onicecandidate = event => {
+                        if (event.candidate) {
+                            addDoc(candidatesCol, { candidate: event.candidate.toJSON(), type: 'offer' });
+                        }
+                    };
+
+                    const offerDescription = await pc.createOffer();
+                    await pc.setLocalDescription(offerDescription);
+
+                    const offer = {
+                        sdp: offerDescription.sdp,
+                        type: offerDescription.type,
+                    };
+
+                    const callDoc = doc(db, 'artifacts', appId, 'public', 'data', 'calls', targetId);
+                    
+                    try {
+                        await setDoc(callDoc, {
+                            callerId: myId,
+                            offer: offer,
+                            status: 'calling',
+                            timestamp: Date.now()
+                        });
+                    } catch(e) {
+                        console.error("Signaling failed", e);
+                        ui.status.textContent = "Connection failed";
+                        resetCall();
+                        return;
                     }
-                };
 
-                // 3. Create Offer
-                const offerDescription = await pc.createOffer();
-                await pc.setLocalDescription(offerDescription);
-
-                const offer = {
-                    sdp: offerDescription.sdp,
-                    type: offerDescription.type,
-                };
-
-                // 4. Write to Target's Document (Requesting the call)
-                const callDoc = doc(db, 'artifacts', appId, 'public', 'data', 'calls', targetId);
-                await setDoc(callDoc, {
-                    callerId: myId,
-                    offer: offer,
-                    status: 'calling', // Triggers the modal on their side
-                    timestamp: Date.now()
-                });
-
-                // 5. Listen for their Answer
-                unsubscribeCall = onSnapshot(callDoc, (snapshot) => {
-                    const data = snapshot.data();
-                    if (!pc.currentRemoteDescription && data?.answer && data?.status === 'connected') {
-                        const answerDescription = new RTCSessionDescription(data.answer);
-                        pc.setRemoteDescription(answerDescription);
-                        ui.waitingOverlay.classList.add('hidden');
-                    }
-                    if (!data || data.status === 'ended') {
-                         resetCall(); // They rejected or hung up
-                    }
-                });
-
-                // 6. Listen for their Candidates
-                unsubscribeCandidates = onSnapshot(candidatesCol, (snapshot) => {
-                    snapshot.docChanges().forEach((change) => {
-                        if (change.type === 'added') {
-                            const data = change.doc.data();
-                            if (data.type === 'answer') { // Only add answer candidates
-                                const candidate = new RTCIceCandidate(data.candidate);
-                                pc.addIceCandidate(candidate);
-                            }
+                    unsubscribeActiveCall = onSnapshot(callDoc, (snapshot) => {
+                        const data = snapshot.data();
+                        if (!pc.currentRemoteDescription && data?.answer && data?.status === 'connected') {
+                            const answerDescription = new RTCSessionDescription(data.answer);
+                            pc.setRemoteDescription(answerDescription);
+                            ui.waitingOverlay.classList.add('hidden');
+                        }
+                        if (!data || data.status === 'ended') {
+                             resetCall(); 
                         }
                     });
-                });
-            }
-        };
+
+                    unsubscribeCandidates = onSnapshot(candidatesCol, (snapshot) => {
+                        snapshot.docChanges().forEach((change) => {
+                            if (change.type === 'added') {
+                                const data = change.doc.data();
+                                if (data.type === 'answer') {
+                                    const candidate = new RTCIceCandidate(data.candidate);
+                                    pc.addIceCandidate(candidate);
+                                }
+                            }
+                        });
+                    });
+                }
+            };
+        }
 
         // --- ACCEPT CALL LOGIC ---
-        ui.acceptBtn.onclick = async () => {
-            ui.incomingModal.classList.add('hidden');
-            ui.incomingModal.classList.remove('flex');
-            
-            if (await startLocalStream()) {
-                isCaller = false;
-                currentCallId = myId; // The call is happening on MY document ID
+        if(ui.acceptBtn) {
+            ui.acceptBtn.onclick = async () => {
+                ui.incomingModal.classList.add('hidden');
+                ui.incomingModal.classList.remove('flex');
                 
-                // UI Switch
-                ui.lobby.classList.add('hidden');
-                ui.call.classList.remove('hidden');
-                ui.waitingOverlay.classList.add('hidden'); // No waiting, instant connect
+                if (await startLocalStream()) {
+                    isCaller = false;
+                    currentCallId = myId; 
+                    
+                    ui.lobby.classList.add('hidden');
+                    ui.call.classList.remove('hidden');
+                    ui.waitingOverlay.classList.add('hidden');
 
-                // 1. Setup PC
-                pc = new RTCPeerConnection(servers);
-                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-                pc.ontrack = event => {
-                    event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
-                };
+                    pc = new RTCPeerConnection(servers);
+                    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+                    pc.ontrack = event => {
+                        event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
+                    };
 
-                // 2. Candidates
-                const candidatesCol = collection(db, 'artifacts', appId, 'public', 'data', `calls/${myId}/candidates`);
-                pc.onicecandidate = event => {
-                    if (event.candidate) {
-                        addDoc(candidatesCol, { candidate: event.candidate.toJSON(), type: 'answer' });
-                    }
-                };
-
-                // 3. Fetch Offer
-                const callDoc = doc(db, 'artifacts', appId, 'public', 'data', 'calls', myId);
-                const snapshot = await getDoc(callDoc);
-                const data = snapshot.data();
-                const offerDescription = data.offer;
-
-                await pc.setRemoteDescription(new RTCSessionDescription(offerDescription));
-
-                // 4. Create Answer
-                const answerDescription = await pc.createAnswer();
-                await pc.setLocalDescription(answerDescription);
-
-                const answer = {
-                    type: answerDescription.type,
-                    sdp: answerDescription.sdp,
-                };
-
-                // 5. Update Doc (Accepting)
-                await updateDoc(callDoc, {
-                    answer: answer,
-                    status: 'connected'
-                });
-
-                // 6. Listen for Offer Candidates (from Caller)
-                unsubscribeCandidates = onSnapshot(candidatesCol, (snapshot) => {
-                    snapshot.docChanges().forEach((change) => {
-                        if (change.type === 'added') {
-                            const data = change.doc.data();
-                            if (data.type === 'offer') {
-                                const candidate = new RTCIceCandidate(data.candidate);
-                                pc.addIceCandidate(candidate);
-                            }
+                    // Corrected Path
+                    const candidatesCol = collection(db, 'artifacts', appId, 'public', 'data', 'calls', myId, 'candidates');
+                    
+                    pc.onicecandidate = event => {
+                        if (event.candidate) {
+                            addDoc(candidatesCol, { candidate: event.candidate.toJSON(), type: 'answer' });
                         }
+                    };
+
+                    const callDoc = doc(db, 'artifacts', appId, 'public', 'data', 'calls', myId);
+                    const snapshot = await getDoc(callDoc);
+                    const data = snapshot.data();
+                    const offerDescription = data.offer;
+
+                    await pc.setRemoteDescription(new RTCSessionDescription(offerDescription));
+
+                    const answerDescription = await pc.createAnswer();
+                    await pc.setLocalDescription(answerDescription);
+
+                    const answer = {
+                        type: answerDescription.type,
+                        sdp: answerDescription.sdp,
+                    };
+
+                    await updateDoc(callDoc, {
+                        answer: answer,
+                        status: 'connected'
                     });
-                });
-            }
-        };
+
+                    unsubscribeCandidates = onSnapshot(candidatesCol, (snapshot) => {
+                        snapshot.docChanges().forEach((change) => {
+                            if (change.type === 'added') {
+                                const data = change.doc.data();
+                                if (data.type === 'offer') {
+                                    const candidate = new RTCIceCandidate(data.candidate);
+                                    pc.addIceCandidate(candidate);
+                                }
+                            }
+                        });
+                    });
+                }
+            };
+        }
 
         // --- DECLINE / HANG UP ---
-        
         async function endCall() {
-            // Signal end
             if (currentCallId) {
-                // Determine which doc to delete/update.
-                // If I am caller, I write to targetId. If I am callee, I write to myId.
                 const docId = isCaller ? currentCallId : myId;
                 const callDoc = doc(db, 'artifacts', appId, 'public', 'data', 'calls', docId);
-                
                 try {
-                    // We delete the doc to signal end
                     await deleteDoc(callDoc); 
                 } catch(e) { console.log("Error ending call", e); }
             }
@@ -539,66 +529,73 @@
         }
 
         function resetCall() {
-            // Cleanup WebRTC
             if (pc) { pc.close(); pc = null; }
             if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
             
-            // Cleanup Listeners
-            // (Note: we don't stop listening for *incoming* calls (listenForIncomingCalls), 
-            // only the specific call listeners)
-            if (isCaller && unsubscribeCall) unsubscribeCall(); // Only unsubscribe if we were the caller observing target
-            if (unsubscribeCandidates) unsubscribeCandidates();
+            // Clean up ONLY the active call listeners, keep the incoming listener alive
+            if (unsubscribeActiveCall) { unsubscribeActiveCall(); unsubscribeActiveCall = null; }
+            if (unsubscribeCandidates) { unsubscribeCandidates(); unsubscribeCandidates = null; }
 
-            // UI Reset
-            ui.incomingModal.classList.add('hidden');
-            ui.incomingModal.classList.remove('flex');
-            ui.call.classList.add('hidden');
-            ui.lobby.classList.remove('hidden');
-            ui.lobby.classList.remove('opacity-0');
-            ui.callBtn.disabled = false;
-            ui.status.textContent = "";
+            if(ui.incomingModal) {
+                ui.incomingModal.classList.add('hidden');
+                ui.incomingModal.classList.remove('flex');
+            }
+            if(ui.call) ui.call.classList.add('hidden');
+            if(ui.lobby) {
+                ui.lobby.classList.remove('hidden');
+                ui.lobby.classList.remove('opacity-0');
+            }
+            if(ui.callBtn) ui.callBtn.disabled = false;
+            if(ui.status) ui.status.textContent = "";
             currentCallId = null;
-            
-            // Re-init listener if we were the caller (because we stopped listening to our own doc temporarily? No wait, listener is separate)
-            // Actually, listener for incoming calls is permanent.
         }
 
-        ui.declineBtn.onclick = async () => {
-             ui.incomingModal.classList.add('hidden');
-             ui.incomingModal.classList.remove('flex');
-             // If we decline, we delete our own doc
-             const callDoc = doc(db, 'artifacts', appId, 'public', 'data', 'calls', myId);
-             await deleteDoc(callDoc);
-        };
+        if(ui.declineBtn) {
+            ui.declineBtn.onclick = async () => {
+                 ui.incomingModal.classList.add('hidden');
+                 ui.incomingModal.classList.remove('flex');
+                 const callDoc = doc(db, 'artifacts', appId, 'public', 'data', 'calls', myId);
+                 await deleteDoc(callDoc);
+            };
+        }
 
-        ui.hangupBtn.onclick = endCall;
-        ui.cancelBtn.onclick = endCall;
+        if(ui.hangupBtn) ui.hangupBtn.onclick = endCall;
+        if(ui.cancelBtn) ui.cancelBtn.onclick = endCall;
 
-        // --- CONTROLS ---
-        ui.muteBtn.onclick = () => {
-            if(localStream) {
-                const track = localStream.getAudioTracks()[0];
-                track.enabled = !track.enabled;
-                ui.muteBtn.innerHTML = track.enabled ? '<i data-lucide="mic" class="w-6 h-6"></i>' : '<i data-lucide="mic-off" class="w-6 h-6 text-red-500"></i>';
-                lucide.createIcons();
+        if(ui.muteBtn) {
+            ui.muteBtn.onclick = () => {
+                if(localStream) {
+                    const track = localStream.getAudioTracks()[0];
+                    if(track) {
+                        track.enabled = !track.enabled;
+                        ui.muteBtn.innerHTML = track.enabled ? '<i data-lucide="mic" class="w-6 h-6"></i>' : '<i data-lucide="mic-off" class="w-6 h-6 text-red-500"></i>';
+                        lucide.createIcons();
+                    }
+                }
+            };
+        }
+
+        if(ui.cameraBtn) {
+            ui.cameraBtn.onclick = () => {
+                if(localStream) {
+                    const track = localStream.getVideoTracks()[0];
+                    if(track) {
+                        track.enabled = !track.enabled;
+                        ui.cameraBtn.innerHTML = track.enabled ? '<i data-lucide="video" class="w-6 h-6"></i>' : '<i data-lucide="video-off" class="w-6 h-6 text-red-500"></i>';
+                        lucide.createIcons();
+                    }
+                }
+            };
+        }
+
+        if (ui.copyIdBtn) {
+             ui.copyIdBtn.onclick = () => {
+                 navigator.clipboard.writeText(myId).then(() => {
+                     const original = ui.copyIdBtn.innerHTML;
+                     ui.copyIdBtn.textContent = "Copied!";
+                     setTimeout(() => ui.copyIdBtn.innerHTML = original, 1500);
+                 });
             }
-        };
-
-        ui.cameraBtn.onclick = () => {
-            if(localStream) {
-                const track = localStream.getVideoTracks()[0];
-                track.enabled = !track.enabled;
-                ui.cameraBtn.innerHTML = track.enabled ? '<i data-lucide="video" class="w-6 h-6"></i>' : '<i data-lucide="video-off" class="w-6 h-6 text-red-500"></i>';
-                lucide.createIcons();
-            }
-        };
-
-        ui.copyIdBtn.onclick = () => {
-             navigator.clipboard.writeText(myId).then(() => {
-                 const original = ui.copyIdBtn.innerHTML;
-                 ui.copyIdBtn.textContent = "Copied!";
-                 setTimeout(() => ui.copyIdBtn.innerHTML = original, 1500);
-             });
         }
     </script>
 </body>
